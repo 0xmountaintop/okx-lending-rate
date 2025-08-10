@@ -36,10 +36,14 @@ async function readCsvData(): Promise<RateData[]> {
         const rate = parseFloat(row.preRate);
         
         if (!isNaN(rate) && isFinite(rate) && !isNaN(date.getTime())) {
+          // Round down the date to the hour
+          const roundedDate = new Date(date);
+          roundedDate.setMinutes(0, 0, 0); // Set minutes, seconds, and milliseconds to 0
+          
           results.push({
             timestamp: row.timestamp,
             preRate: row.preRate,
-            date,
+            date: roundedDate,
             rate
           });
         }
