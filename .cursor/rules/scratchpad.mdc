@@ -20,17 +20,31 @@ Build a TypeScript solution to:
 - Fully local processing (no external services)
 
 ## Progress
-[ ] Initialize TypeScript project structure
-[ ] Create directories and basic files
-[ ] Install dependencies 
-[ ] Implement fetchRate.ts
-[ ] Implement renderRateImage.ts  
-[ ] Create GitHub Actions workflow
-[ ] Test and verify functionality
+[X] Initialize TypeScript project structure
+[X] Create directories and basic files
+[X] Install dependencies 
+[X] Implement fetchRate.ts
+[X] Implement renderRateImage.ts  
+[X] Create GitHub Actions workflow
+[X] Fix ES Module import error for D3
+[X] Test and verify functionality
+[ ] Fix GitHub Actions triggering issue
 [ ] Add devcontainer
 
 ## Lessons
 - csv-writer module requires named import syntax: `import * as createCsvWriter from 'csv-writer'` instead of default import
+- D3 v7+ is ES Module only, requires ES Module configuration:
+  1. Add `"type": "module"` to package.json
+  2. Update tsconfig.json: `"module": "ESNext"` and `"ts-node": {"esm": true}`
+  3. Replace `require.main === module` with `import.meta.url === \`file://${process.argv[1]}\``
+  4. Add `__dirname` polyfill: `const __dirname = path.dirname(fileURLToPath(import.meta.url))`
+  5. Update npm scripts to use `node --loader ts-node/esm` instead of `ts-node`
+- GitHub Actions troubleshooting checklist:
+  1. Actions must be enabled in repository settings (Actions tab)
+  2. Scheduled workflows need repository activity to start working
+  3. Manual trigger (workflow_dispatch) can test if workflow works
+  4. New repositories may have Actions disabled by default
+  5. Check Settings → Actions → General for permissions
 
 ## Notes
 - Using chartjs-node-canvas for local image generation
