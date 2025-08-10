@@ -2,6 +2,8 @@
 
 Automated monitoring and visualization of OKX USDT lending rates using TypeScript and GitHub Actions.
 
+![OKX USDT Lending Rate Chart](output/rates.svg)
+
 ## Overview
 
 This project fetches USDT lending rate data from the OKX API every hour and generates visual charts to track rate changes over time.
