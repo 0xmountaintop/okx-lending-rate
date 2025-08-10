@@ -1,0 +1,37 @@
+---
+description:
+globs:
+alwaysApply: true
+---
+# OKX Lending Rate Project Scratchpad
+
+## Task Overview
+Build a TypeScript solution to:
+1. Fetch USDT lending rates from OKX API hourly
+2. Store data in CSV with UTC timestamps  
+3. Generate line chart images from the data
+4. Automate with GitHub Actions (hourly at :05)
+
+## Requirements
+- UTC ISO-8601 timestamps
+- Polling: hourly at minute 05 (0:05, 1:05, etc)
+- GitHub Actions scheduling
+- Simple line chart visualization
+- Fully local processing (no external services)
+
+## Progress
+[ ] Initialize TypeScript project structure
+[ ] Create directories and basic files
+[ ] Install dependencies 
+[ ] Implement fetchRate.ts
+[ ] Implement renderRateImage.ts  
+[ ] Create GitHub Actions workflow
+[ ] Test and verify functionality
+
+## Lessons
+(none yet)
+
+## Notes
+- Using chartjs-node-canvas for local image generation
+- CSV format: timestamp,preRate
+- GitHub Actions will commit back to repo

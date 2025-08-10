@@ -1,0 +1,31 @@
+{
+  "name": "okx-lending-rate",
+  "version": "1.0.0",
+  "description": "Automated OKX lending rate monitoring and visualization",
+  "main": "index.js",
+  "scripts": {
+    "fetch": "ts-node src/fetchRate.ts",
+    "render": "ts-node src/renderRateImage.ts",
+    "build": "tsc",
+    "dev": "npm run fetch && npm run render"
+  },
+  "keywords": ["okx", "lending", "rates", "monitoring", "typescript"],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "csv-writer": "^1.6.0",
+    "csv-parser": "^3.0.0",
+    "d3": "^7.8.5",
+    "jsdom": "^23.0.1"
+  },
+  "devDependencies": {
+    "typescript": "^5.3.0",
+    "ts-node": "^10.9.0",
+    "@types/node": "^20.10.0",
+    "@types/d3": "^7.4.3",
+    "@types/jsdom": "^21.1.6"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
