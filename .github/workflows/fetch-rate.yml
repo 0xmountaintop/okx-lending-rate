@@ -1,0 +1,52 @@
+name: Fetch OKX Lending Rate
+
+on:
+  schedule:
+    # Run every hour at 5 minutes past the hour (0:05, 1:05, 2:05, etc.)
+    - cron: '5 * * * *'
+  workflow_dispatch: # Allow manual triggering
+
+permissions:
+  contents: write
+
+jobs:
+  fetch-and-render:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'npm'
+
+    - name: Install dependencies
+      run: npm ci
+
+    - name: Fetch lending rate data
+      run: npm run fetch
+
+    - name: Generate rate chart
+      run: npm run render
+
+    - name: Configure Git
+      run: |
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+
+    - name: Commit and push changes
+      run: |
+        git add data/rates.csv output/
+        if git diff --staged --quiet; then
+          echo "No changes to commit"
+        else
+          git commit -m "Update lending rate data - $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+          git push
+        fi
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
