@@ -1,0 +1,15 @@
+{
+  "name": "okx-lending-rate-dev",
+  "build": {
+    "dockerfile": "Dockerfile",
+    "context": "..",
+    "args": {
+      "VARIANT": "20"
+    }
+  },
+  "settings": {
+    "terminal.integrated.defaultProfile.linux": "fish"
+  },
+  "postCreateCommand": "npm install",
+  "remoteUser": "node"
+}

@@ -2,7 +2,7 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import createCsvWriter from 'csv-writer';
+import * as createCsvWriter from 'csv-writer';
 
 interface OKXResponse {
   code: string;
