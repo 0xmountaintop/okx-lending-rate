@@ -2,9 +2,13 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
+import { fileURLToPath } from 'url';
 import * as d3 from 'd3';
 import { JSDOM } from 'jsdom';
 import csvParser from 'csv-parser';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 interface RateData {
   timestamp: string;
@@ -203,7 +207,7 @@ async function generateChart(): Promise<void> {
 }
 
 // Execute if run directly
-if (require.main === module) {
+if (import.meta.url === `file://${process.argv[1]}`) {
   generateChart();
 }
 

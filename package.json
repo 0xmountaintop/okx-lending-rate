@@ -2,10 +2,11 @@
   "name": "okx-lending-rate",
   "version": "1.0.0",
   "description": "Automated OKX lending rate monitoring and visualization",
+  "type": "module",
   "main": "index.js",
   "scripts": {
-    "fetch": "ts-node src/fetchRate.ts",
-    "render": "ts-node src/renderRateImage.ts",
+    "fetch": "node --loader ts-node/esm src/fetchRate.ts",
+    "render": "node --loader ts-node/esm src/renderRateImage.ts",
     "build": "tsc",
     "dev": "npm run fetch && npm run render"
   },

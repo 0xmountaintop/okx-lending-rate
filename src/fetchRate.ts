@@ -2,7 +2,11 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
+import { fileURLToPath } from 'url';
 import * as createCsvWriter from 'csv-writer';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 interface OKXResponse {
   code: string;
@@ -107,7 +111,7 @@ async function fetchLendingRate(): Promise<void> {
 }
 
 // Execute if run directly
-if (require.main === module) {
+if (import.meta.url === `file://${process.argv[1]}`) {
   fetchLendingRate();
 }
 
