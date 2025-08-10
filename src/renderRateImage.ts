@@ -184,17 +184,17 @@ async function generateChart(): Promise<void> {
     
     console.log(`Chart saved to ${svgPath}`);
     
-    // Also save the latest rate info as a simple text summary
-    const latest = data[data.length - 1];
-    const summary = `Latest OKX USDT Lending Rate
-Timestamp: ${latest.timestamp}
-Pre Rate: ${(latest.rate * 100).toFixed(4)}%
-Total Data Points: ${data.length}
-Generated: ${new Date().toISOString()}`;
+//     // Also save the latest rate info as a simple text summary
+//     const latest = data[data.length - 1];
+//     const summary = `Latest OKX USDT Lending Rate
+// Timestamp: ${latest.timestamp}
+// Pre Rate: ${(latest.rate * 100).toFixed(4)}%
+// Total Data Points: ${data.length}
+// Generated: ${new Date().toISOString()}`;
     
-    const summaryPath = path.join(outputDir, 'summary.txt');
-    fs.writeFileSync(summaryPath, summary);
-    console.log(`Summary saved to ${summaryPath}`);
+//     const summaryPath = path.join(outputDir, 'summary.txt');
+//     fs.writeFileSync(summaryPath, summary);
+//     console.log(`Summary saved to ${summaryPath}`);
 
   } catch (error) {
     console.error('Error generating chart:', error);

@@ -27,9 +27,10 @@ Build a TypeScript solution to:
 [ ] Implement renderRateImage.ts  
 [ ] Create GitHub Actions workflow
 [ ] Test and verify functionality
+[ ] Add devcontainer
 
 ## Lessons
-(none yet)
+- csv-writer module requires named import syntax: `import * as createCsvWriter from 'csv-writer'` instead of default import
 
 ## Notes
 - Using chartjs-node-canvas for local image generation
