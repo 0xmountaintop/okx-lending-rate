@@ -18,18 +18,20 @@ interface RateData {
 }
 
 const CSV_PATH = path.join(__dirname, '../data/rates.csv');
+const DATA_DIR = path.join(__dirname, '../data');
+const OUTPUT_DIR = path.join(__dirname, '../output');
 const OUTPUT_PATH = path.join(__dirname, '../output/rates.png');
 
-async function readCsvData(): Promise<RateData[]> {
+async function readCsvData(csvFilePath: string): Promise<RateData[]> {
   return new Promise((resolve, reject) => {
     const results: RateData[] = [];
     
-    if (!fs.existsSync(CSV_PATH)) {
-      reject(new Error(`CSV file not found: ${CSV_PATH}`));
+    if (!fs.existsSync(csvFilePath)) {
+      reject(new Error(`CSV file not found: ${csvFilePath}`));
       return;
     }
 
-    fs.createReadStream(CSV_PATH)
+    fs.createReadStream(csvFilePath)
       .pipe(csvParser())
       .on('data', (row) => {
         const date = new Date(row.timestamp);
@@ -57,18 +59,33 @@ async function readCsvData(): Promise<RateData[]> {
   });
 }
 
-async function generateChart(): Promise<void> {
-  try {
-    console.log(`[${new Date().toISOString()}] Reading CSV data...`);
-    const data = await readCsvData();
-    
-    if (data.length === 0) {
-      throw new Error('No valid data found in CSV file');
-    }
+function getArchiveFiles(): string[] {
+  if (!fs.existsSync(DATA_DIR)) {
+    return [];
+  }
 
-    console.log(`Found ${data.length} data points`);
+  const files = fs.readdirSync(DATA_DIR);
+  const archiveFiles = files
+    .filter(file => file.match(/^\d{4}-\d{2}\.csv$/))
+    .map(file => path.join(DATA_DIR, file));
+  
+  return archiveFiles.sort();
+}
 
-    // Set up dimensions and margins
+function getMonthLabel(monthKey: string): string {
+  const [year, month] = monthKey.split('-');
+  const date = new Date(parseInt(year), parseInt(month) - 1);
+  return date.toLocaleDateString('en-US', { year: 'numeric', month: 'long' });
+}
+
+async function generateSingleChart(data: RateData[], title: string, outputPath: string): Promise<void> {
+  if (data.length === 0) {
+    throw new Error('No valid data found for chart generation');
+  }
+
+  console.log(`Found ${data.length} data points for ${title}`);
+
+  // Set up dimensions and margins
     const margin = { top: 20, right: 30, bottom: 40, left: 50 };
     const width = 800 - margin.left - margin.right;
     const height = 400 - margin.top - margin.bottom;
@@ -139,7 +156,7 @@ async function generateChart(): Promise<void> {
       .style('font-size', '16px')
       .style('font-weight', 'bold')
       .style('fill', '#333')
-      .text('OKX USDT Lending Rate (preRate)');
+      .text(title);
 
     // Add the line
     g.append('path')
@@ -177,35 +194,66 @@ async function generateChart(): Promise<void> {
       .style('stroke-dasharray', '3,3')
       .style('opacity', 0.3);
 
-    // Get SVG string
-    const svgString = document.body.innerHTML;
-    
-    // Ensure output directory exists
-    const outputDir = path.dirname(OUTPUT_PATH);
-    if (!fs.existsSync(outputDir)) {
-      fs.mkdirSync(outputDir, { recursive: true });
-    }
+  // Get SVG string
+  const svgString = document.body.innerHTML;
+  
+  // Ensure output directory exists
+  const outputDir = path.dirname(outputPath);
+  if (!fs.existsSync(outputDir)) {
+    fs.mkdirSync(outputDir, { recursive: true });
+  }
 
-    // For now, save as SVG (we could convert to PNG using sharp or similar if needed)
-    const svgPath = OUTPUT_PATH.replace('.png', '.svg');
-    fs.writeFileSync(svgPath, svgString);
+  // Save as SVG
+  fs.writeFileSync(outputPath, svgString);
+  
+  console.log(`Chart saved to ${outputPath}`);
+}
+
+async function generateChart(): Promise<void> {
+  try {
+    console.log(`[${new Date().toISOString()}] Generating charts...`);
     
-    console.log(`Chart saved to ${svgPath}`);
+    // Generate current month chart
+    if (fs.existsSync(CSV_PATH)) {
+      console.log('Generating current month chart...');
+      const currentData = await readCsvData(CSV_PATH);
+      if (currentData.length > 0) {
+        const currentOutputPath = path.join(OUTPUT_DIR, 'rates.svg');
+        await generateSingleChart(currentData, 'OKX USDT Lending Rate - Current Month', currentOutputPath);
+      } else {
+        console.log('No current month data found');
+      }
+    } else {
+      console.log('No current month CSV file found');
+    }
     
-//     // Also save the latest rate info as a simple text summary
-//     const latest = data[data.length - 1];
-//     const summary = `Latest OKX USDT Lending Rate
-// Timestamp: ${latest.timestamp}
-// Pre Rate: ${(latest.rate * 100).toFixed(4)}%
-// Total Data Points: ${data.length}
-// Generated: ${new Date().toISOString()}`;
+    // Generate historical charts
+    const archiveFiles = getArchiveFiles();
+    console.log(`Found ${archiveFiles.length} archive files`);
     
-//     const summaryPath = path.join(outputDir, 'summary.txt');
-//     fs.writeFileSync(summaryPath, summary);
-//     console.log(`Summary saved to ${summaryPath}`);
+    for (const archiveFile of archiveFiles) {
+      const monthKey = path.basename(archiveFile, '.csv');
+      const monthLabel = getMonthLabel(monthKey);
+      
+      console.log(`Generating chart for ${monthLabel} (${monthKey})...`);
+      
+      try {
+        const archiveData = await readCsvData(archiveFile);
+        if (archiveData.length > 0) {
+          const archiveOutputPath = path.join(OUTPUT_DIR, `${monthKey}.svg`);
+          await generateSingleChart(archiveData, `OKX USDT Lending Rate - ${monthLabel}`, archiveOutputPath);
+        } else {
+          console.log(`No data found in ${archiveFile}`);
+        }
+      } catch (error) {
+        console.error(`Error processing archive file ${archiveFile}:`, error);
+      }
+    }
+    
+    console.log('Chart generation completed');
 
   } catch (error) {
-    console.error('Error generating chart:', error);
+    console.error('Error generating charts:', error);
     process.exit(1);
   }
 }
