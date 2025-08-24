@@ -124,7 +124,13 @@ async function generateSingleChart(data: RateData[], title: string, outputPath: 
     g.append('g')
       .attr('transform', `translate(0,${height})`)
       .call(d3.axisBottom(xScale)
-        .tickFormat(d3.timeFormat('%m/%d %H:%M') as any));
+        .ticks(d3.timeHour.every(24))
+        .tickFormat(d3.timeFormat('%m/%d') as any))
+      .selectAll('text')
+      .style('text-anchor', 'end')
+      .attr('dx', '-.8em')
+      .attr('dy', '.15em')
+      .attr('transform', 'rotate(-45)');
 
     g.append('g')
       .call(d3.axisLeft(yScale)
@@ -181,6 +187,7 @@ async function generateSingleChart(data: RateData[], title: string, outputPath: 
       .attr('class', 'grid')
       .attr('transform', `translate(0,${height})`)
       .call(d3.axisBottom(xScale)
+        .ticks(d3.timeHour.every(24)) // Match the axis ticks
         .tickSize(-height)
         .tickFormat('' as any))
       .style('stroke-dasharray', '3,3')
