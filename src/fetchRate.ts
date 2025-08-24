@@ -3,6 +3,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
+import csvParser from 'csv-parser';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -89,14 +90,80 @@ async function fetchHistoricalRates(startDate: string, endDate: string): Promise
   return filteredRecords;
 }
 
+async function checkAndArchivePreviousMonth(): Promise<void> {
+  if (!fs.existsSync(CSV_PATH)) {
+    return;
+  }
+
+  const existingData = await readExistingData();
+  if (existingData.length === 0) {
+    return;
+  }
+
+  // Check first record to determine if it's from previous month
+  const firstRecord = existingData[0];
+  const firstRecordDate = new Date(firstRecord.timestamp);
+  const currentDate = new Date();
+  
+  // Use UTC methods for consistent comparison
+  const firstRecordMonth = firstRecordDate.getUTCMonth();
+  const firstRecordYear = firstRecordDate.getUTCFullYear();
+  const currentMonth = currentDate.getUTCMonth();
+  const currentYear = currentDate.getUTCFullYear();
+  
+  console.log(`Current: ${currentYear}-${(currentMonth + 1).toString().padStart(2, '0')}, Existing data: ${firstRecordYear}-${(firstRecordMonth + 1).toString().padStart(2, '0')}`);
+  
+  // Check if existing data is from previous month
+  const isPreviousMonth = (firstRecordYear < currentYear) || 
+    (firstRecordYear === currentYear && firstRecordMonth < currentMonth);
+  
+  if (isPreviousMonth) {
+    const archiveFileName = `${firstRecordYear}-${(firstRecordMonth + 1).toString().padStart(2, '0')}.csv`;
+    const archivePath = path.join(__dirname, '../data', archiveFileName);
+    
+    console.log(`Archiving previous month data to ${archiveFileName}`);
+    
+    // Copy existing data to archive
+    fs.copyFileSync(CSV_PATH, archivePath);
+    console.log(`Successfully archived to ${archivePath}`);
+  }
+}
+
+async function readExistingData(): Promise<RateRecord[]> {
+  return new Promise((resolve, reject) => {
+    const results: RateRecord[] = [];
+    
+    if (!fs.existsSync(CSV_PATH)) {
+      resolve([]);
+      return;
+    }
+
+    fs.createReadStream(CSV_PATH)
+      .pipe(csvParser())
+      .on('data', (row) => {
+        results.push({
+          timestamp: row.timestamp,
+          preRate: row.preRate
+        });
+      })
+      .on('end', () => {
+        resolve(results);
+      })
+      .on('error', reject);
+  });
+}
+
 async function fetchLendingRate(): Promise<void> {
   try {
     console.log(`[${new Date().toISOString()}] Fetching OKX lending rates for current month...`);
     
+    // Check and archive previous month data if needed
+    await checkAndArchivePreviousMonth();
+    
     const now = new Date();
-    const currentYear = now.getFullYear();
-    const currentMonth = now.getMonth() + 1;
-    const currentDay = now.getDate();
+    const currentYear = now.getUTCFullYear();
+    const currentMonth = now.getUTCMonth() + 1;
+    const currentDay = now.getUTCDate();
     const currentHour = now.getUTCHours();
     
     console.log(`Fetching data from ${currentYear}-${currentMonth.toString().padStart(2, '0')}-01 00:00 to current hour`);
