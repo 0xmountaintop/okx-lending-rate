@@ -203,6 +203,15 @@ async function generateSingleChart(data: RateData[], title: string, outputPath: 
     fs.mkdirSync(outputDir, { recursive: true });
   }
 
+  // Check if file already exists (skip only for archive files, not rates.svg)
+  const fileName = path.basename(outputPath);
+  const isArchiveFile = fileName.match(/^\d{4}-\d{2}\.svg$/);
+  
+  if (isArchiveFile && fs.existsSync(outputPath)) {
+    console.log(`Archive chart already exists at ${outputPath}, skipping...`);
+    return;
+  }
+
   // Save as SVG
   fs.writeFileSync(outputPath, svgString);
   
