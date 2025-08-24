@@ -3,237 +3,155 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
-import * as createCsvWriter from 'csv-writer';
-import csvParser from 'csv-parser';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-interface OKXResponse {
+interface OKXHistoryResponse {
   code: string;
   data: Array<{
-    avgAmt: string;
-    avgAmtUsd: string;
-    avgRate: string;
+    amt: string;
     ccy: string;
-    estRate: string;
-    preRate: string;
+    rate: string;
+    ts: string;
   }>;
   msg: string;
 }
 
-const API_URL = 'https://www.okx.com/api/v5/finance/savings/lending-rate-summary?ccy=USDT';
+const API_BASE_URL = 'https://www.okx.com/api/v5/finance/savings/lending-rate-history';
 const CSV_PATH = path.join(__dirname, '../data/rates.csv');
-const DATA_DIR = path.join(__dirname, '../data');
 
 interface RateRecord {
   timestamp: string;
   preRate: string;
 }
 
-async function readCsvData(filePath: string): Promise<RateRecord[]> {
-  return new Promise((resolve, reject) => {
-    const results: RateRecord[] = [];
-    
-    if (!fs.existsSync(filePath)) {
-      resolve([]);
-      return;
-    }
 
-    fs.createReadStream(filePath)
-      .pipe(csvParser())
-      .on('data', (row) => {
-        results.push({
-          timestamp: row.timestamp,
-          preRate: row.preRate
-        });
-      })
-      .on('end', () => {
-        resolve(results);
-      })
-      .on('error', reject);
-  });
-}
-
-async function writeCsvData(filePath: string, data: RateRecord[], append: boolean = false): Promise<void> {
-  if (data.length === 0) return;
-
-  const csvWriter = createCsvWriter.createObjectCsvWriter({
-    path: filePath,
-    header: [
-      { id: 'timestamp', title: 'timestamp' },
-      { id: 'preRate', title: 'preRate' }
-    ],
-    append: append
+async function fetchHistoricalRates(startDate: string, endDate: string): Promise<RateRecord[]> {
+  const startTimestamp = new Date(startDate).getTime();
+  const endTimestamp = new Date(endDate).getTime();
+  
+  console.log(`Fetching historical data from ${startDate} to ${endDate}`);
+  
+  const url = new URL(API_BASE_URL);
+  url.searchParams.set('ccy', 'USDT');
+  url.searchParams.set('after', endTimestamp.toString());
+  url.searchParams.set('before', startTimestamp.toString());
+  
+  const response = await fetch(url.toString(), {
+    headers: {
+      'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+      'Accept': 'application/json',
+    },
   });
 
-  if (!append) {
-    // Ensure directory exists
-    const csvDir = path.dirname(filePath);
-    if (!fs.existsSync(csvDir)) {
-      fs.mkdirSync(csvDir, { recursive: true });
-    }
-    
-    // Write header if not appending
-    fs.writeFileSync(filePath, 'timestamp,preRate\n');
+  if (!response.ok) {
+    throw new Error(`HTTP error! status: ${response.status}`);
   }
 
-  await csvWriter.writeRecords(data);
-}
-
-function getMonthKey(timestamp: string): string {
-  const date = new Date(timestamp);
-  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}`;
-}
-
-async function performRollover(): Promise<void> {
-  console.log(`[${new Date().toISOString()}] Checking for rollover...`);
+  const data: OKXHistoryResponse = await response.json();
   
-  if (!fs.existsSync(CSV_PATH)) {
-    console.log('No existing CSV file, skipping rollover');
-    return;
+  if (data.code !== '0') {
+    throw new Error(`API error: ${data.msg || 'Unknown error'}`);
   }
 
-  const existingData = await readCsvData(CSV_PATH);
-  if (existingData.length === 0) {
-    console.log('No existing data, skipping rollover');
-    return;
+  if (!data.data || data.data.length === 0) {
+    console.log('No data available for the specified date range');
+    return [];
   }
 
-  const currentMonthKey = getMonthKey(new Date().toISOString());
-  const dataByMonth = new Map<string, RateRecord[]>();
-
-  // Group data by month
-  for (const record of existingData) {
-    const monthKey = getMonthKey(record.timestamp);
-    if (!dataByMonth.has(monthKey)) {
-      dataByMonth.set(monthKey, []);
-    }
-    dataByMonth.get(monthKey)!.push(record);
-  }
-
-  console.log(`Found data for months: ${Array.from(dataByMonth.keys()).join(', ')}`);
-  console.log(`Current month: ${currentMonthKey}`);
-
-  let hasRollover = false;
+  console.log(`Received ${data.data.length} records`);
   
-  // Process each month
-  for (const [monthKey, monthData] of dataByMonth) {
-    if (monthKey !== currentMonthKey) {
-      // Archive old month data
-      const archiveFilePath = path.join(DATA_DIR, `${monthKey}.csv`);
-      console.log(`Archiving ${monthData.length} records for ${monthKey} to ${archiveFilePath}`);
-      
-      // Sort data chronologically
-      monthData.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
-      
-      // Write to archive file
-      await writeCsvData(archiveFilePath, monthData, false);
-      hasRollover = true;
-    }
+  // Convert records to our format
+  const records: RateRecord[] = [];
+  for (const record of data.data) {
+    const recordTimestamp = parseInt(record.ts);
+    const isoTimestamp = new Date(recordTimestamp).toISOString();
+    records.push({
+      timestamp: isoTimestamp,
+      preRate: record.rate
+    });
   }
-
-  if (hasRollover) {
-    // Rewrite current CSV with only current month data
-    const currentMonthData = dataByMonth.get(currentMonthKey) || [];
-    if (currentMonthData.length > 0) {
-      console.log(`Keeping ${currentMonthData.length} records for current month ${currentMonthKey}`);
-      // Sort current month data chronologically
-      currentMonthData.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
-      await writeCsvData(CSV_PATH, currentMonthData, false);
-    } else {
-      console.log(`No current month data, creating empty CSV file`);
-      fs.writeFileSync(CSV_PATH, 'timestamp,preRate\n');
-    }
-    
-    console.log(`Rollover completed successfully`);
-  } else {
-    console.log('No rollover needed - all data is from current month');
-  }
+  
+  // Filter by date range and sort chronologically
+  const filteredRecords = records
+    .filter(record => {
+      const recordDate = new Date(record.timestamp);
+      const targetDate = new Date(endDate);
+      // Only include records from the target day
+      return recordDate.getUTCFullYear() === targetDate.getUTCFullYear() &&
+             recordDate.getUTCMonth() === targetDate.getUTCMonth() &&
+             recordDate.getUTCDate() === targetDate.getUTCDate();
+    })
+    .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+  
+  console.log(`Filtered to ${filteredRecords.length} records in date range`);
+  return filteredRecords;
 }
 
 async function fetchLendingRate(): Promise<void> {
   try {
-    console.log(`[${new Date().toISOString()}] Fetching OKX lending rate...`);
+    console.log(`[${new Date().toISOString()}] Fetching OKX lending rates for current month...`);
     
-    // Perform rollover check before saving new data
-    await performRollover();
+    const now = new Date();
+    const currentYear = now.getFullYear();
+    const currentMonth = now.getMonth() + 1;
+    const currentDay = now.getDate();
+    const currentHour = now.getUTCHours();
     
-    // Fetch data from OKX API
-    const response = await fetch(API_URL, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-        'Accept': 'application/json',
-      },
-    });
-
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
-    }
-
-    const data: OKXResponse = await response.json();
+    console.log(`Fetching data from ${currentYear}-${currentMonth.toString().padStart(2, '0')}-01 00:00 to current hour`);
     
-    // Validate response structure
-    if (data.code !== '0' || !data.data || data.data.length === 0) {
-      throw new Error(`Invalid API response: ${JSON.stringify(data)}`);
-    }
-
-    const preRate = data.data[0].preRate;
+    const allHistoricalData: RateRecord[] = [];
     
-    // Validate preRate
-    const preRateNum = parseFloat(preRate);
-    if (isNaN(preRateNum) || !isFinite(preRateNum)) {
-      throw new Error(`Invalid preRate value: ${preRate}`);
-    }
-
-    // Generate UTC timestamp
-    const timestamp = new Date().toISOString();
-    
-    console.log(`Fetched preRate: ${preRate} at ${timestamp}`);
-
-    // Check if CSV file exists, if not create it with headers
-    const csvExists = fs.existsSync(CSV_PATH);
-    if (!csvExists) {
-      // Create directory if it doesn't exist
-      const csvDir = path.dirname(CSV_PATH);
-      if (!fs.existsSync(csvDir)) {
-        fs.mkdirSync(csvDir, { recursive: true });
+    // Fetch data day by day from the 1st of current month until today
+    for (let day = 1; day <= currentDay; day++) {
+      const dayStr = day.toString().padStart(2, '0');
+      const monthStr = currentMonth.toString().padStart(2, '0');
+      
+      // For the current day, only fetch up to current hour
+      let endHour = '23:59:59';
+      if (day === currentDay) {
+        endHour = `${currentHour.toString().padStart(2, '0')}:59:59`;
       }
       
-      // Write header
-      fs.writeFileSync(CSV_PATH, 'timestamp,preRate\n');
-      console.log('Created CSV file with headers');
-    }
-
-    // Prevent duplicate entries by checking the last line
-    const csvContent = fs.readFileSync(CSV_PATH, 'utf-8');
-    const lines = csvContent.trim().split('\n');
-    
-    if (lines.length > 1) {
-      const lastLine = lines[lines.length - 1];
-      const [lastTimestamp] = lastLine.split(',');
-      const lastHour = new Date(lastTimestamp).getUTCHours();
-      const currentHour = new Date(timestamp).getUTCHours();
+      const prevDay = new Date(`${currentYear}-${monthStr}-${dayStr}T00:00:00Z`);
+      prevDay.setDate(prevDay.getDate() - 1);
+      const startDate = prevDay.toISOString().replace('T00:00:00.000Z', 'T23:59:59Z');
+      const endDate = `${currentYear}-${monthStr}-${dayStr}T${endHour}Z`;
       
-      // Skip if we already have data for this hour
-      if (lastHour === currentHour && new Date(lastTimestamp).toDateString() === new Date(timestamp).toDateString()) {
-        console.log('Data for this hour already exists, skipping...');
-        return;
-      }
+      console.log(`\n--- Fetching data for ${currentYear}-${monthStr}-${dayStr} (up to ${endHour}) ---`);
+      
+      const dayData = await fetchHistoricalRates(startDate, endDate);
+      allHistoricalData.push(...dayData);
+      
+      console.log(`Collected ${dayData.length} records for day ${dayStr}, total: ${allHistoricalData.length}`);
+      
+      // Small delay to be respectful to the API
+      await new Promise(resolve => setTimeout(resolve, 1000));
     }
-
-    // Append new data to CSV
-    const csvWriter = createCsvWriter.createObjectCsvWriter({
-      path: CSV_PATH,
-      header: [
-        { id: 'timestamp', title: 'timestamp' },
-        { id: 'preRate', title: 'preRate' }
-      ],
-      append: true
-    });
-
-    await csvWriter.writeRecords([{ timestamp, preRate }]);
-    console.log(`Successfully appended rate data to ${CSV_PATH}`);
+    
+    if (allHistoricalData.length === 0) {
+      console.log('No historical data found for the current month');
+      return;
+    }
+    
+    console.log(`\nFetched ${allHistoricalData.length} total records for current month`);
+    
+    // Sort data chronologically
+    allHistoricalData.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+    
+    // Ensure directory exists
+    const csvDir = path.dirname(CSV_PATH);
+    if (!fs.existsSync(csvDir)) {
+      fs.mkdirSync(csvDir, { recursive: true });
+    }
+    
+    // Overwrite CSV file with all current month data
+    const csvContent = 'timestamp,preRate\n' + 
+      allHistoricalData.map(record => `${record.timestamp},${record.preRate}`).join('\n') + '\n';
+    
+    fs.writeFileSync(CSV_PATH, csvContent);
+    console.log(`Successfully overwrote ${CSV_PATH} with ${allHistoricalData.length} records`);
 
   } catch (error) {
     console.error('Error fetching lending rate:', error);
