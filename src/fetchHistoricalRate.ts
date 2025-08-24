@@ -145,18 +145,50 @@ async function prependHistoricalData(historicalData: RateRecord[]): Promise<void
 
 async function main(): Promise<void> {
   try {
+    // Parse command line arguments for year and month
+    const args = process.argv.slice(2);
+    let year: number, month: number;
+    
+    if (args.length >= 2) {
+      year = parseInt(args[0]);
+      month = parseInt(args[1]);
+    } else if (args.length === 1) {
+      // If only one argument, assume it's in YYYY-MM format
+      const [yearStr, monthStr] = args[0].split('-');
+      year = parseInt(yearStr);
+      month = parseInt(monthStr);
+    } else {
+      // Default to current month if no arguments provided
+      const now = new Date();
+      year = now.getFullYear();
+      month = now.getMonth() + 1; // getMonth() returns 0-11
+    }
+    
+    if (isNaN(year) || isNaN(month) || month < 1 || month > 12) {
+      console.error('Usage: npm run fetch-historical [YYYY] [MM] or [YYYY-MM]');
+      console.error('Example: npm run fetch-historical 2025 7');
+      console.error('Example: npm run fetch-historical 2025-07');
+      process.exit(1);
+    }
+    
+    console.log(`Fetching historical data for ${year}-${month.toString().padStart(2, '0')}`);
+    
     const allHistoricalData: RateRecord[] = [];
     
-    // Fetch data day by day from August 1-10, 2025
+    // Get number of days in the specified month
+    const daysInMonth = new Date(year, month, 0).getDate();
+    
+    // Fetch data day by day for the specified month
     // Extend range to capture 00:00 data from previous day's end
-    for (let day = 1; day <= 31; day++) {
+    for (let day = 1; day <= daysInMonth; day++) {
       const dayStr = day.toString().padStart(2, '0');
-      const prevDay = new Date(`2025-07-${dayStr}T00:00:00Z`);
+      const monthStr = month.toString().padStart(2, '0');
+      const prevDay = new Date(`${year}-${monthStr}-${dayStr}T00:00:00Z`);
       prevDay.setDate(prevDay.getDate() - 1);
       const startDate = prevDay.toISOString().replace('T00:00:00.000Z', 'T23:59:59Z');
-      const endDate = `2025-07-${dayStr}T23:59:59Z`;
+      const endDate = `${year}-${monthStr}-${dayStr}T23:59:59Z`;
       
-      console.log(`\n--- Fetching data for 2025-07-${dayStr} ---`);
+      console.log(`\n--- Fetching data for ${year}-${monthStr}-${dayStr} ---`);
       
       const dayData = await fetchHistoricalRates(startDate, endDate);
       allHistoricalData.push(...dayData);
