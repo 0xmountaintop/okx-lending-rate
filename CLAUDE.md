@@ -71,3 +71,12 @@ The project uses `.github/workflows/fetch-rate.yml` which:
 - Both scripts exit with code 1 on errors
 - HTTP response status validation for API calls
 - File system checks before CSV/directory operations
+
+
+## Lessons
+
+### Date/Time Issues
+- When parsing CSV timestamps like "2025-08-01T00:00:00.000Z", timezone interpretation can cause month mismatches
+- JavaScript Date.getUTCMonth() returns 0-indexed months (0=Jan, 7=Aug)
+- The timestamp "2025-08-01T00:00:00.000Z" gets parsed as July 31st in local timezone (PDT), not August 1st UTC
+- Always compare dates in UTC methods for consistent behavior
