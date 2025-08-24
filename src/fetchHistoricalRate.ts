@@ -149,14 +149,14 @@ async function main(): Promise<void> {
     
     // Fetch data day by day from August 1-10, 2025
     // Extend range to capture 00:00 data from previous day's end
-    for (let day = 1; day <= 10; day++) {
+    for (let day = 1; day <= 31; day++) {
       const dayStr = day.toString().padStart(2, '0');
-      const prevDay = new Date(`2025-08-${dayStr}T00:00:00Z`);
+      const prevDay = new Date(`2025-07-${dayStr}T00:00:00Z`);
       prevDay.setDate(prevDay.getDate() - 1);
       const startDate = prevDay.toISOString().replace('T00:00:00.000Z', 'T23:59:59Z');
-      const endDate = `2025-08-${dayStr}T23:59:59Z`;
+      const endDate = `2025-07-${dayStr}T23:59:59Z`;
       
-      console.log(`\n--- Fetching data for 2025-08-${dayStr} ---`);
+      console.log(`\n--- Fetching data for 2025-07-${dayStr} ---`);
       
       const dayData = await fetchHistoricalRates(startDate, endDate);
       allHistoricalData.push(...dayData);
