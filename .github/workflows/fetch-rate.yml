@@ -41,7 +41,7 @@ jobs:
 
     - name: Commit and push changes
       run: |
-        git add data/rates.csv output/
+        git add data/ output/
         if git diff --staged --quiet; then
           echo "No changes to commit"
         else

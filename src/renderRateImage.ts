@@ -20,7 +20,7 @@ interface RateData {
 const CSV_PATH = path.join(__dirname, '../data/rates.csv');
 const DATA_DIR = path.join(__dirname, '../data');
 const OUTPUT_DIR = path.join(__dirname, '../output');
-const OUTPUT_PATH = path.join(__dirname, '../output/rates.png');
+const RECENT_DAYS = 30;
 
 async function readCsvData(csvFilePath: string): Promise<RateData[]> {
   return new Promise((resolve, reject) => {
@@ -76,6 +76,16 @@ function getMonthLabel(monthKey: string): string {
   const [year, month] = monthKey.split('-');
   const date = new Date(parseInt(year), parseInt(month) - 1);
   return date.toLocaleDateString('en-US', { year: 'numeric', month: 'long' });
+}
+
+// rates.csv is a rolling window maintained by fetchRate.ts; keep only the last
+// `days` days relative to the newest data point (deterministic for a dataset).
+async function readRecentData(days: number): Promise<RateData[]> {
+  if (!fs.existsSync(CSV_PATH)) return [];
+  const all = await readCsvData(CSV_PATH);
+  if (all.length === 0) return [];
+  const cutoff = all[all.length - 1].date.getTime() - days * 24 * 60 * 60 * 1000;
+  return all.filter(d => d.date.getTime() > cutoff);
 }
 
 async function generateSingleChart(data: RateData[], title: string, outputPath: string): Promise<void> {
@@ -229,18 +239,17 @@ async function generateChart(): Promise<void> {
   try {
     console.log(`[${new Date().toISOString()}] Generating charts...`);
     
-    // Generate current month chart
-    if (fs.existsSync(CSV_PATH)) {
-      console.log('Generating current month chart...');
-      const currentData = await readCsvData(CSV_PATH);
-      if (currentData.length > 0) {
-        const currentOutputPath = path.join(OUTPUT_DIR, 'rates.svg');
-        await generateSingleChart(currentData, 'OKX USDT Lending Rate - Current Month', currentOutputPath);
-      } else {
-        console.log('No current month data found');
-      }
+    // Generate rolling last-N-days chart (embedded in README)
+    console.log(`Generating last ${RECENT_DAYS} days chart...`);
+    const recentData = await readRecentData(RECENT_DAYS);
+    if (recentData.length > 0) {
+      await generateSingleChart(
+        recentData,
+        `OKX USDT Lending Rate - Last ${RECENT_DAYS} Days`,
+        path.join(OUTPUT_DIR, 'rates.svg')
+      );
     } else {
-      console.log('No current month CSV file found');
+      console.log('No data found for recent chart');
     }
     
     // Generate historical charts

@@ -15,7 +15,7 @@ This is an OKX USDT lending rate monitoring project that automatically fetches l
 ## Key Commands
 
 ### Development
-- `npm run fetch` - Fetch current lending rate from OKX API and append to CSV
+- `npm run fetch` - Fill missing hours of the 40-day rolling window in `data/rates.csv`, archive finished months, prune old rows
 - `npm run render` - Generate SVG chart from existing CSV data  
 - `npm run dev` - Run both fetch and render scripts sequentially
 - `npm run build` - Compile TypeScript to JavaScript (outputs to ./dist)
@@ -27,20 +27,22 @@ This is an OKX USDT lending rate monitoring project that automatically fetches l
 ## Architecture
 
 ### Core Components
-- **fetchRate.ts** (`src/fetchRate.ts`): API client that fetches USDT lending rates from OKX, validates data, and appends to CSV with duplicate prevention
+- **fetchRate.ts** (`src/fetchRate.ts`): Maintains `data/rates.csv` as a 40-day rolling window: fetches only missing hours (gaps, new hours, backfill) from the OKX history API, archives finished months to `data/YYYY-MM.csv`, prunes old rows
 - **renderRateImage.ts** (`src/renderRateImage.ts`): D3.js-based chart generator that reads CSV data and creates SVG visualizations using JSDOM
 
 ### Data Flow
-1. `fetchRate.ts` calls OKX API endpoint: `https://www.okx.com/api/v5/finance/savings/lending-rate-summary?ccy=USDT`
-2. Extracts `preRate` field from API response and validates as finite number
-3. Stores timestamped data in `data/rates.csv` with duplicate prevention (one entry per hour)
-4. `renderRateImage.ts` reads CSV, processes data points, and generates SVG chart in `output/rates.svg`
+1. `fetchRate.ts` reads `data/rates.csv`, finds missing UTC hours in the window (plus unarchived finished months from their first hour), and fetches them from `https://www.okx.com/api/v5/finance/savings/lending-rate-history?ccy=USDT` in 24h chunks (`after`/`before` are exclusive cursors, max 100 rows/response)
+2. The history `rate` field is stored as `preRate` (same value as the summary API's `preRate`); one row per UTC hour
+3. Finished months are written once to `data/YYYY-MM.csv` (complete, or after a 1-day grace period with a warning if the API lacks hours); then rows older than 40 days are pruned and `rates.csv` rewritten
+4. `renderRateImage.ts` draws `output/rates.svg` (README chart) from `data/rates.csv` only — last 30 days before the newest row — and `output/YYYY-MM.svg` from each archive (skipped if the SVG already exists). Render never calls the API.
 
 ### File Structure
-- `src/fetchRate.ts` - API data collection with validation and CSV append
+- `src/fetchRate.ts` - Incremental fetch, monthly archiving, rolling-window pruning
 - `src/renderRateImage.ts` - D3.js chart generation with JSDOM rendering
-- `data/rates.csv` - Historical rate data (timestamp, preRate columns)
-- `output/rates.svg` - Generated line chart with grid lines and styling
+- `data/rates.csv` - Rolling 40-day hourly data (timestamp, preRate columns)
+- `data/YYYY-MM.csv` - Archived finished months
+- `output/rates.svg` - Last 30 days chart (embedded in README)
+- `output/YYYY-MM.svg` - Per-month charts
 
 ## GitHub Actions Automation
 
@@ -80,3 +82,7 @@ The project uses `.github/workflows/fetch-rate.yml` which:
 - JavaScript Date.getUTCMonth() returns 0-indexed months (0=Jan, 7=Aug)
 - The timestamp "2025-08-01T00:00:00.000Z" gets parsed as July 31st in local timezone (PDT), not August 1st UTC
 - Always compare dates in UTC methods for consistent behavior
+### Data persistence
+- Monthly archive CSVs (`data/YYYY-MM.csv`) are created in CI at month rollover; the workflow must `git add data/` (not just `data/rates.csv`), otherwise they are lost. Archives 2025-08..2026-09 were lost this way (their SVGs survive); 2026-10 was backfilled from the `lending-rate-history` API.
+- OKX publishes each hourly history value by ~:05 and it does not change later (verified against 40 CI commits), so existing rows never need refetching.
+- Don't commit a locally regenerated `data/rates.csv` / `output/rates.svg` while CI is committing hourly — it conflicts; CI self-heals the rolling window on its next run.

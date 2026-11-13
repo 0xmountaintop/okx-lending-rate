@@ -1,5 +1,18 @@
 #!/usr/bin/env node
 
+/**
+ * Maintains data/rates.csv as a rolling window of hourly USDT lending rates.
+ *
+ * Each run:
+ *   1. Reads the existing rows from rates.csv.
+ *   2. Fetches only the missing hours from the OKX history API: normally just the newest
+ *      hour (1 request), plus any gap in the window, or a backfill when the CSV is new/short.
+ *   3. Archives each finished month to data/YYYY-MM.csv (never overwrites an existing archive).
+ *   4. Drops rows older than RETENTION_DAYS and writes rates.csv back.
+ *
+ * renderRateImage.ts only reads CSVs; it never calls the API.
+ */
+
 import * as fs from 'fs';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
@@ -19,207 +32,209 @@ interface OKXHistoryResponse {
   msg: string;
 }
 
-const API_BASE_URL = 'https://www.okx.com/api/v5/finance/savings/lending-rate-history';
-const CSV_PATH = path.join(__dirname, '../data/rates.csv');
-
 interface RateRecord {
   timestamp: string;
   preRate: string;
 }
 
+const API_BASE_URL = 'https://www.okx.com/api/v5/finance/savings/lending-rate-history';
+const DATA_DIR = path.join(__dirname, '../data');
+const CSV_PATH = path.join(DATA_DIR, 'rates.csv');
 
-async function fetchHistoricalRates(startDate: string, endDate: string): Promise<RateRecord[]> {
-  const startTimestamp = new Date(startDate).getTime();
-  const endTimestamp = new Date(endDate).getTime();
-  
-  console.log(`Fetching historical data from ${startDate} to ${endDate}`);
-  
+// Keep > 31 days so the previous month is still complete when it gets archived,
+// with margin for missed CI runs. The chart only shows the last 30 days.
+const RETENTION_DAYS = 40;
+const HOUR_MS = 60 * 60 * 1000;
+const DAY_MS = 24 * HOUR_MS;
+// The API returns at most 100 rows per request; 24h chunks (24 rows) stay well below it.
+const CHUNK_MS = DAY_MS;
+
+function floorToHour(ms: number): number {
+  return Math.floor(ms / HOUR_MS) * HOUR_MS;
+}
+
+function monthKey(ms: number): string {
+  const d = new Date(ms);
+  return `${d.getUTCFullYear()}-${(d.getUTCMonth() + 1).toString().padStart(2, '0')}`;
+}
+
+function monthStartMs(ms: number): number {
+  const d = new Date(ms);
+  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1);
+}
+
+/** Fetch hourly records with startMs <= ts <= endMs. */
+async function fetchRange(startMs: number, endMs: number): Promise<Map<number, string>> {
   const url = new URL(API_BASE_URL);
   url.searchParams.set('ccy', 'USDT');
-  url.searchParams.set('after', endTimestamp.toString());
-  url.searchParams.set('before', startTimestamp.toString());
-  
+  // OKX pagination: `after` = return records older than ts, `before` = newer than ts (both exclusive)
+  url.searchParams.set('after', (endMs + 1).toString());
+  url.searchParams.set('before', (startMs - 1).toString());
+
   const response = await fetch(url.toString(), {
     headers: {
       'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
       'Accept': 'application/json',
     },
   });
-
   if (!response.ok) {
     throw new Error(`HTTP error! status: ${response.status}`);
   }
 
   const data: OKXHistoryResponse = await response.json();
-  
   if (data.code !== '0') {
     throw new Error(`API error: ${data.msg || 'Unknown error'}`);
   }
 
-  if (!data.data || data.data.length === 0) {
-    console.log('No data available for the specified date range');
-    return [];
+  const result = new Map<number, string>();
+  for (const record of data.data ?? []) {
+    const ts = parseInt(record.ts);
+    const rate = parseFloat(record.rate);
+    if (!isFinite(ts) || !isFinite(rate)) continue;
+    if (ts < startMs || ts > endMs) continue;
+    result.set(floorToHour(ts), record.rate);
   }
-
-  console.log(`Received ${data.data.length} records`);
-  
-  // Convert records to our format
-  const records: RateRecord[] = [];
-  for (const record of data.data) {
-    const recordTimestamp = parseInt(record.ts);
-    const isoTimestamp = new Date(recordTimestamp).toISOString();
-    records.push({
-      timestamp: isoTimestamp,
-      preRate: record.rate
-    });
-  }
-  
-  // Filter by date range and sort chronologically
-  const filteredRecords = records
-    .filter(record => {
-      const recordDate = new Date(record.timestamp);
-      const targetDate = new Date(endDate);
-      // Only include records from the target day
-      return recordDate.getUTCFullYear() === targetDate.getUTCFullYear() &&
-             recordDate.getUTCMonth() === targetDate.getUTCMonth() &&
-             recordDate.getUTCDate() === targetDate.getUTCDate();
-    })
-    .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
-  
-  console.log(`Filtered to ${filteredRecords.length} records in date range`);
-  return filteredRecords;
+  return result;
 }
 
-async function checkAndArchivePreviousMonth(): Promise<void> {
-  if (!fs.existsSync(CSV_PATH)) {
-    return;
-  }
-
-  const existingData = await readExistingData();
-  if (existingData.length === 0) {
-    return;
-  }
-
-  // Check first record to determine if it's from previous month
-  const firstRecord = existingData[0];
-  const firstRecordDate = new Date(firstRecord.timestamp);
-  const currentDate = new Date();
-  
-  // Use UTC methods for consistent comparison
-  const firstRecordMonth = firstRecordDate.getUTCMonth();
-  const firstRecordYear = firstRecordDate.getUTCFullYear();
-  const currentMonth = currentDate.getUTCMonth();
-  const currentYear = currentDate.getUTCFullYear();
-  
-  console.log(`Current: ${currentYear}-${(currentMonth + 1).toString().padStart(2, '0')}, Existing data: ${firstRecordYear}-${(firstRecordMonth + 1).toString().padStart(2, '0')}`);
-  
-  // Check if existing data is from previous month
-  const isPreviousMonth = (firstRecordYear < currentYear) || 
-    (firstRecordYear === currentYear && firstRecordMonth < currentMonth);
-  
-  if (isPreviousMonth) {
-    const archiveFileName = `${firstRecordYear}-${(firstRecordMonth + 1).toString().padStart(2, '0')}.csv`;
-    const archivePath = path.join(__dirname, '../data', archiveFileName);
-    
-    console.log(`Archiving previous month data to ${archiveFileName}`);
-    
-    // Copy existing data to archive
-    fs.copyFileSync(CSV_PATH, archivePath);
-    console.log(`Successfully archived to ${archivePath}`);
-  }
-}
-
-async function readExistingData(): Promise<RateRecord[]> {
-  return new Promise((resolve, reject) => {
-    const results: RateRecord[] = [];
-    
-    if (!fs.existsSync(CSV_PATH)) {
-      resolve([]);
-      return;
+/** Fetch [startMs, endMs] in day-sized chunks and merge into `rows`. */
+async function fetchInto(rows: Map<number, string>, startMs: number, endMs: number): Promise<number> {
+  let added = 0;
+  for (let chunkStart = startMs; chunkStart <= endMs; chunkStart += CHUNK_MS) {
+    const chunkEnd = Math.min(chunkStart + CHUNK_MS - 1, endMs);
+    console.log(`Fetching ${new Date(chunkStart).toISOString()} → ${new Date(chunkEnd).toISOString()}`);
+    const chunk = await fetchRange(chunkStart, chunkEnd);
+    for (const [ts, rate] of chunk) {
+      if (!rows.has(ts)) added++;
+      rows.set(ts, rate);
     }
+    if (chunkStart + CHUNK_MS <= endMs) {
+      // Be gentle with the API when backfilling several days
+      await new Promise(resolve => setTimeout(resolve, 500));
+    }
+  }
+  return added;
+}
 
-    fs.createReadStream(CSV_PATH)
+async function readCsv(filePath: string): Promise<Map<number, string>> {
+  const rows = new Map<number, string>();
+  if (!fs.existsSync(filePath)) return rows;
+  return new Promise((resolve, reject) => {
+    fs.createReadStream(filePath)
       .pipe(csvParser())
-      .on('data', (row) => {
-        results.push({
-          timestamp: row.timestamp,
-          preRate: row.preRate
-        });
+      .on('data', (row: RateRecord) => {
+        const ts = new Date(row.timestamp).getTime();
+        const rate = parseFloat(row.preRate);
+        if (!isNaN(ts) && isFinite(rate)) {
+          rows.set(floorToHour(ts), row.preRate);
+        }
       })
-      .on('end', () => {
-        resolve(results);
-      })
+      .on('end', () => resolve(rows))
       .on('error', reject);
   });
 }
 
+function writeCsv(filePath: string, rows: Array<[number, string]>): void {
+  const sorted = [...rows].sort((a, b) => a[0] - b[0]);
+  const content = 'timestamp,preRate\n' +
+    sorted.map(([ts, rate]) => `${new Date(ts).toISOString()},${rate}`).join('\n') + '\n';
+  fs.writeFileSync(filePath, content);
+}
+
+function hoursInMonth(key: string): [number, number] {
+  const [y, m] = key.split('-').map(Number);
+  return [Date.UTC(y, m - 1, 1), Date.UTC(y, m, 1)]; // [start, end)
+}
+
+/** Finished months that have rows in the window but no archive file yet. */
+function unarchivedFinishedMonths(rows: Map<number, string>, nowMs: number): string[] {
+  const currentMonthStart = monthStartMs(nowMs);
+  const months = new Set<string>();
+  for (const ts of rows.keys()) {
+    if (ts < currentMonthStart) months.add(monthKey(ts));
+  }
+  return [...months].sort().filter(key => !fs.existsSync(path.join(DATA_DIR, `${key}.csv`)));
+}
+
+/**
+ * Write data/YYYY-MM.csv for each finished month without an archive (never overwrites).
+ * Missing hours have already been refetched from the month start, so a month is normally
+ * complete. If the API still lacks some hours, wait until a day after month end (the last
+ * hours may just be published late), then archive what exists with a warning instead of
+ * letting pruning silently delete the month.
+ */
+function archiveFinishedMonths(rows: Map<number, string>, nowMs: number): void {
+  for (const key of unarchivedFinishedMonths(rows, nowMs)) {
+    const [start, end] = hoursInMonth(key);
+    const monthRows = [...rows].filter(([ts]) => ts >= start && ts < end);
+    const expected = (end - start) / HOUR_MS;
+
+    if (monthRows.length < expected) {
+      if (nowMs < end + DAY_MS) {
+        console.log(`Skipping archive ${key}: ${monthRows.length}/${expected} hours so far, retrying next run`);
+        continue;
+      }
+      console.warn(`WARNING: archiving ${key} with ${monthRows.length}/${expected} hours; the API has no data for the rest`);
+    }
+
+    writeCsv(path.join(DATA_DIR, `${key}.csv`), monthRows);
+    console.log(`Archived ${monthRows.length} rows to data/${key}.csv`);
+  }
+}
+
+/** Group the hours in [startMs, endMs] that are not in `rows` into contiguous [from, to] ranges. */
+function missingRanges(rows: Map<number, string>, startMs: number, endMs: number): Array<[number, number]> {
+  const ranges: Array<[number, number]> = [];
+  for (let ts = startMs; ts <= endMs; ts += HOUR_MS) {
+    if (rows.has(ts)) continue;
+    const last = ranges[ranges.length - 1];
+    if (last && last[1] === ts - HOUR_MS) last[1] = ts;
+    else ranges.push([ts, ts]);
+  }
+  return ranges;
+}
+
 async function fetchLendingRate(): Promise<void> {
   try {
-    console.log(`[${new Date().toISOString()}] Fetching OKX lending rates for current month...`);
-    
-    // Check and archive previous month data if needed
-    await checkAndArchivePreviousMonth();
-    
-    const now = new Date();
-    const currentYear = now.getUTCFullYear();
-    const currentMonth = now.getUTCMonth() + 1;
-    const currentDay = now.getUTCDate();
-    const currentHour = now.getUTCHours();
-    
-    console.log(`Fetching data from ${currentYear}-${currentMonth.toString().padStart(2, '0')}-01 00:00 to current hour`);
-    
-    const allHistoricalData: RateRecord[] = [];
-    
-    // Fetch data day by day from the 1st of current month until today
-    for (let day = 1; day <= currentDay; day++) {
-      const dayStr = day.toString().padStart(2, '0');
-      const monthStr = currentMonth.toString().padStart(2, '0');
-      
-      // For the current day, only fetch up to current hour
-      let endHour = '23:59:59';
-      if (day === currentDay) {
-        endHour = `${currentHour.toString().padStart(2, '0')}:59:59`;
-      }
-      
-      const prevDay = new Date(`${currentYear}-${monthStr}-${dayStr}T00:00:00Z`);
-      prevDay.setDate(prevDay.getDate() - 1);
-      const startDate = prevDay.toISOString().replace('T00:00:00.000Z', 'T23:59:59Z');
-      const endDate = `${currentYear}-${monthStr}-${dayStr}T${endHour}Z`;
-      
-      console.log(`\n--- Fetching data for ${currentYear}-${monthStr}-${dayStr} (up to ${endHour}) ---`);
-      
-      const dayData = await fetchHistoricalRates(startDate, endDate);
-      allHistoricalData.push(...dayData);
-      
-      console.log(`Collected ${dayData.length} records for day ${dayStr}, total: ${allHistoricalData.length}`);
-      
-      // Small delay to be respectful to the API
-      await new Promise(resolve => setTimeout(resolve, 1000));
-    }
-    
-    if (allHistoricalData.length === 0) {
-      console.log('No historical data found for the current month');
-      return;
-    }
-    
-    console.log(`\nFetched ${allHistoricalData.length} total records for current month`);
-    
-    // Sort data chronologically
-    allHistoricalData.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
-    
-    // Ensure directory exists
-    const csvDir = path.dirname(CSV_PATH);
-    if (!fs.existsSync(csvDir)) {
-      fs.mkdirSync(csvDir, { recursive: true });
-    }
-    
-    // Overwrite CSV file with all current month data
-    const csvContent = 'timestamp,preRate\n' + 
-      allHistoricalData.map(record => `${record.timestamp},${record.preRate}`).join('\n') + '\n';
-    
-    fs.writeFileSync(CSV_PATH, csvContent);
-    console.log(`Successfully overwrote ${CSV_PATH} with ${allHistoricalData.length} records`);
+    const nowMs = Date.now();
+    const currentHour = floorToHour(nowMs);
+    const windowStart = currentHour - RETENTION_DAYS * DAY_MS;
+    console.log(`[${new Date(nowMs).toISOString()}] Updating rolling window (${RETENTION_DAYS} days)...`);
 
+    if (!fs.existsSync(DATA_DIR)) {
+      fs.mkdirSync(DATA_DIR, { recursive: true });
+    }
+
+    const rows = await readCsv(CSV_PATH);
+    console.log(`Loaded ${rows.size} existing rows from ${CSV_PATH}`);
+
+    // Ignore rows from the future (clock skew / bad edits) so they cannot block fetching
+    for (const ts of [...rows.keys()]) {
+      if (ts > currentHour) rows.delete(ts);
+    }
+
+    // Fill every missing hour in the window, not just the two ends. Unarchived finished
+    // months are filled from their first hour so their archive is complete.
+    let fillStart = windowStart;
+    for (const key of unarchivedFinishedMonths(rows, nowMs)) {
+      fillStart = Math.min(fillStart, hoursInMonth(key)[0]);
+    }
+
+    let added = 0;
+    for (const [from, to] of missingRanges(rows, fillStart, currentHour)) {
+      added += await fetchInto(rows, from, to);
+    }
+    console.log(`Added ${added} new rows`);
+
+    // Archive before pruning so a finished month is saved while still complete
+    archiveFinishedMonths(rows, nowMs);
+
+    const kept = [...rows].filter(([ts]) => ts >= windowStart);
+    if (kept.length === 0) {
+      throw new Error('No data available in the rolling window');
+    }
+    writeCsv(CSV_PATH, kept);
+    console.log(`Wrote ${kept.length} rows to ${CSV_PATH} (pruned ${rows.size - kept.length})`);
   } catch (error) {
     console.error('Error fetching lending rate:', error);
     process.exit(1);
