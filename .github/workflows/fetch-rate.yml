@@ -22,8 +22,15 @@ jobs:
     - name: Setup Node.js
       uses: actions/setup-node@v4
       with:
-        node-version: '18'
+        # Node 24 LTS (supported until 2028-04). check-latest makes setup-node fetch the
+        # newest 24.x patch instead of a possibly outdated runner-cached one, so security
+        # releases are picked up automatically.
+        node-version: '24'
+        check-latest: true
         cache: 'npm'
+
+    - name: Show Node.js version
+      run: node --version
 
     - name: Install dependencies
       run: npm ci

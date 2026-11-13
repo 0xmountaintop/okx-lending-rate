@@ -77,7 +77,7 @@ The workflow runs automatically every hour at 5 minutes past the hour (0:05, 1:0
 
 ## Requirements
 
-- Node.js 18+
+- Node.js 24 LTS, latest patch release (CI uses `check-latest: true` to always get the newest 24.x security fixes)
 - TypeScript
 - Dependencies: csv-writer, csv-parser, d3, jsdom
 

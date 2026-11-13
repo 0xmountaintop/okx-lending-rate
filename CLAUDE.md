@@ -86,3 +86,7 @@ The project uses `.github/workflows/fetch-rate.yml` which:
 - Monthly archive CSVs (`data/YYYY-MM.csv`) are created in CI at month rollover; the workflow must `git add data/` (not just `data/rates.csv`), otherwise they are lost. Archives 2025-08..2026-09 were lost this way (their SVGs survive); 2026-10 was backfilled from the `lending-rate-history` API.
 - OKX publishes each hourly history value by ~:05 and it does not change later (verified against 40 CI commits), so existing rows never need refetching.
 - Don't commit a locally regenerated `data/rates.csv` / `output/rates.svg` while CI is committing hourly — it conflicts; CI self-heals the rolling window on its next run.
+
+### Node.js version
+- CI uses Node 24 LTS (EOL 2028-04-30) with `check-latest: true` so setup-node always installs the newest 24.x security patch rather than a stale runner-cached one. Node 18 (EOL 2025-04) and 20 (EOL 2026-04) are unsupported. Check https://nodejs.org/dist/index.json (`security: true`) and https://github.com/nodejs/Release/blob/main/schedule.json before choosing a version.
+- Local machine uses nvm (`/root/.nvm`); verified working on v24.22.3 with npm 12.2.2.
